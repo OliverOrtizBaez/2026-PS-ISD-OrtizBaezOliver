@@ -1,24 +1,26 @@
-//vamos a programar un cliente mediante el cual  vamos a probar la arquitectura cliente servidor por medio de una peticion mediante protocolo http utilizando metodo GET a la ruta: /api/talleres
-
-//tenemos que conectarnos al servicio de la base de datos, el problema es como apuntar al back 
-
 const API_URL = "https://proyectobackcecyt9.onrender.com";
 
 async function main() {
-    
-    console.log("Cliente peticion GEt -> a ${API_URL}/api/talleres");
+    // Corregido: se usan comillas invertidas `` para interpolar variables
+    console.log(`Cliente peticion GET -> a ${API_URL}/api/talleres`);
 
+    try {
         const inicio = Date.now();
-        const respuesta = await fetch(`${API_URL}/api/talleres`)
-        //Nos da el tiempo de ida y vuelta por medio de la peticion mediante RTT
+        const respuesta = await fetch(`${API_URL}/api/talleres`);
+        
+        // Nos da el tiempo de ida y vuelta por medio de la petición mediante RTT
         const duracionMS = Date.now() - inicio;
-        //un estatus de rror 500 seria una respuesta valida sio el servicio de la bd no esta disponible 
         const cuerpo = await respuesta.json(); 
 
         console.log("ciclo de peticion - respuesta");
-        console.log("protocolo HTTPS sobre TCP :${respuesta.status} ${respuesta.statusText}");
-        console.log("Tiempo de ida y vuelta (RTT): ${duracionMS} ms");
+        console.log(`protocolo HTTPS sobre TCP: ${respuesta.status} ${respuesta.statusText}`);
+        console.log(`Tiempo de ida y vuelta (RTT): ${duracionMS} ms`);
+        console.log("Respuesta recibida:");
         console.log(JSON.stringify(cuerpo, null, 2));
-
+    } catch (error) {
+        console.error("Error al realizar la petición:", error.message);
+    }
 }
 
+// Llama a la función para que se ejecute
+main();
