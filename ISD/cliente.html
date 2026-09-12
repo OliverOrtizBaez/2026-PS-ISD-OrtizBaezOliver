@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Primera Petición GET - Portafolio de Evidencias</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            line-height: 1.6; 
+            margin: 20px auto; 
+            max-width: 900px; 
+            color: #333;
+        }
+        h1, h2, h3 { 
+            color: #6e1c32; 
+        }
+        .encabezado { 
+            background: #f9f9f9; 
+            padding: 15px; 
+            border-left: 5px solid #6e1c32; 
+            margin-bottom: 20px; 
+        }
+        .captura {
+            text-align: center;
+            margin: 20px 0;
+        }
+        img { 
+            max-width: 100%; 
+            border: 1px solid #ccc; 
+            border-radius: 5px; 
+            box-shadow: 2px 2px 8px rgba(0,0,0,0.1); 
+        }
+        .explicacion {
+            background: #ffffff;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        ul {
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <header class="encabezado">
+        <h1>Primera Petición GET</h1>
+        <p><strong>Alumno:</strong> Oliver Ortiz Báez</p>
+        <p><strong>Grupo:</strong> 5IV8</p>
+        <p><strong>Escuela:</strong> CECyT 9 "Juan de Dios Bátiz"</p>
+    </header>
+
+    <main>
+        <section class="captura">
+            <h2>Captura de la Respuesta del Código</h2>
+
+            <img src="./get.png" alt="Captura de consola mostrando la respuesta 200 OK y el JSON obtenido">
+        </section>
+
+        <section class="explicacion">
+            <h2>Análisis de la Petición</h2>
+            
+            <h3>¿Qué pasó?</h3>
+            <p>Se creo una funcion asincrona que detectara el tiempo de latencia entre la api talleres y el usuario, todo a travez de una peticion de tipo get</p>
+
+            <h3>¿Se conectó exitosamente?</h3>
+            <p>Si, ya qu nos arrojo el codigo 200 que indica que todo va bien, asi como la latencia, es decir lo del tiempo que tarda en viajar una peticion y ser respondida </p>
+
+            <h3>¿Qué elementos se obtuvieron?</h3>
+            <p>
+                Bueno, nos dio bastantes datos, como el id de la tabla, nombre, entre otros, observando que lo dio en formato nombre, variable, propio de un json 
+            </p>
+        </section>
+    </main>
+
+</body>
+</html>
