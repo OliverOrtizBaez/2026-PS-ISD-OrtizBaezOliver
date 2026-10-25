@@ -109,34 +109,32 @@
         return n; 
     }
 
-    function subnetearFLSM(ip, prefijo, opciones) {
-        const base = validarRedBase(ip, prefijo);
-        let bitsPrestados;
-        
-        if (opciones.subredes) {
-            bitsPrestados = Math.ceil(Math.log2(opciones.subredes));
-        } else if (opciones.hostPorSubred) {
-            const bitsPorHost = bitsParaHost(opciones.hostPorSubred);
-            bitsPrestados = 32 - prefijo - bitsPorHost;
-        } else {
-            throw new Error('Indica el numero de subredes o de host por subred');
-        }
-        
-        const nuevoPrefijo = prefijo + bitsPrestados;
-        if (bitsPrestados < 0 || nuevoPrefijo > 30) {
-            throw new Error(`No caben: harían falta /${nuevoPrefijo}, fuera del rango /${prefijo}-/30`);
-        }
-        
-        const total = 2**bitsPrestados;
-        const tamano = 2**(32 - nuevoPrefijo);
-        const subredes = [];
-        
-        for (let i = 0; i < total; i++) {
-            subredes.push(describirSubred(base + i * tamano, nuevoPrefijo, `Subred ${i + 1}`));
-        }
-        if (total > 1024) {
-        throw new Error(`El cálculo generaría ${total.toLocaleString('es-MX')} subredes. Especifica un rango más pequeño o un prefijo inicial mayor (ej. /24) para evitar sobrecargar el navegador.`);
+function subnetearFLSM(ip, prefijo, opciones) {
+    const base = validarRedBase(ip, prefijo);
+    let bitsPrestados;
+    
+    if (opciones.subredes) {
+        bitsPrestados = Math.ceil(Math.log2(opciones.subredes));
+    } else if (opciones.hostPorSubred) {
+        const bitsPorHost = bitsParaHost(opciones.hostPorSubred);
+        bitsPrestados = 32 - prefijo - bitsPorHost;
+    } else {
+        throw new Error('Indica el numero de subredes o de host por subred');
+    }
+    
+    const nuevoPrefijo = prefijo + bitsPrestados;
+    if (bitsPrestados < 0 || nuevoPrefijo > 30) {
+        throw new Error(`No caben: harían falta /${nuevoPrefijo}, fuera del rango /${prefijo}-/30`);
+    }
+    
+    const total = 2**bitsPrestados;
 
+    // 1. Validamos PRIMERO el total de subredes
+    if (total > 1024) {
+        throw new Error(`El cálculo generaría ${total.toLocaleString('es-MX')} subredes. Especifica un rango más pequeño o un prefijo inicial mayor (ej. /24) para evitar sobrecargar el navegador.`);
+    }
+
+    // 2. Si no supera el límite, recién aquí se ejecuta el bucle
     const tamano = 2**(32 - nuevoPrefijo);
     const subredes = [];
     
@@ -144,11 +142,14 @@
         subredes.push(describirSubred(base + i * tamano, nuevoPrefijo, `Subred ${i + 1}`));
     }
     
-    return { bitsPrestados, nuevoPrefijo, totalSubredes: total, hostPorSubred: hostUtilizable(nuevoPrefijo), subredes };
+    return { 
+        bitsPrestados, 
+        nuevoPrefijo, 
+        totalSubredes: total, 
+        hostPorSubred: hostUtilizable(nuevoPrefijo), 
+        subredes 
+    };
 }
-        
-        return { bitsPrestados, nuevoPrefijo, totalSubredes: total, hostPorSubred: hostUtilizable(nuevoPrefijo), subredes };
-    }
 
     function bitsParaHost(host) {
         if (!Number.isInteger(host) || host < 1) throw new Error(`${host} no es un numero de host valido`);
