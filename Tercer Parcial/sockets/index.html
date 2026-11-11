@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notificaciones Ejemplo</title>
+</head>
+<body>
+    <h1>Notificaciones Ejemplo</h1>
+    <p>Estado: <span id="estado" class="desconectado">desconectado</span></p>
+    <p>Corre <code>node servidor.js</code> y en su terminal veras el estado del servidor</p>
+    <ul id="lista"></ul>
+    <script>
+        const estado = document.getElementById('estado');
+        const lista = document.getElementById('lista');
+
+        //nesecitamos un protocolo tcp
+        //un websocket es un socket con protocolo tcp
+        const socket = new WebSocket(`ws://${location.host}`);
+
+        socket.addEventListener('open', () =>{
+            estado.textContent = 'conectado';
+            estado.className = 'conectado';
+        });
+        socket.addEventListener('close', () =>{
+            estado.textContent = 'desconectado';
+            estado.className = 'desconectado';
+        });
+
+        socket.addEventListener('mensaje', (event) => {
+            const {tipo, mensaje, fecha} = JSON.parse(evento.data);
+            const item = document.createElement('li');
+            item.innerHTML = ` 
+            <time>${new Date(fecha).toLocaleDateString()}</time> Tipo de Estado [${tipo}] Mensaje: [${}]
+        })
+        
+    </script>
+</body>
+</html>
