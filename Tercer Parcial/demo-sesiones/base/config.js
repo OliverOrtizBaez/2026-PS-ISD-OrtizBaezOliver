@@ -8,6 +8,7 @@ module.exports = {
 
   // Cuánto dura la sesión, en milisegundos. 10 minutos = 10 * 60 * 1000
   maxAgeMs: 10 * 60 * 1000,
+  maxAge: 10 * 60 * 1000,
 
   // true: cada petición reinicia el reloj de la expiración (la sesión vence por inactividad).
   // false: vence a la hora fija, aunque el usuario siga usando la página.
@@ -15,6 +16,7 @@ module.exports = {
 
   // true: el JavaScript de la página NO puede leer la cookie (document.cookie no la muestra).
   httpOnly: true,
+  httpsOnly: true,
 
   // 'lax': la cookie no viaja en peticiones POST que vienen de otros sitios. 'strict' es más estricto.
   sameSite: 'lax',
