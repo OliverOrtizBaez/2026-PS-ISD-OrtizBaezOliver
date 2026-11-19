@@ -1,9 +1,40 @@
-// La página solo hace fetch a la API. El navegador manda la cookie solo (misma página, mismo servidor).
+// La página solo hace fetch a la API. Con JWT el navegador NO manda nada solo:
+// nosotros guardamos el token y lo ponemos en el encabezado Authorization en cada petición.
 const $ = (id) => document.getElementById(id);
+
+// el token vive en localStorage (sobrevive al recargar la página). Ojo: cualquier JavaScript de la página lo puede leer
+const CLAVE_TOKEN = 'jwt';
+const leerToken = () => localStorage.getItem(CLAVE_TOKEN);
+const guardarToken = (token) => localStorage.setItem(CLAVE_TOKEN, token);
+const borrarToken = () => localStorage.removeItem(CLAVE_TOKEN);
+
+// El index.html no se modifica: sus botones siguen diciendo /api/perfil, /api/logout, etc.
+// Aquí se traducen a la ruta JWT incorporada, para no tener dos juegos de rutas en la página.
+// (/api/visita no está: es un contador guardado en la sesión del servidor, JWT no guarda nada de eso)
+const RUTAS_JWT = {
+  '/api/perfil': '/api/jwt/perfil',
+  '/api/admin/reporte': '/api/jwt/reporte',
+  '/api/logout': '/api/jwt/logout',
+};
+
+// El payload (la parte de en medio del token) solo está en base64, no cifrado: cualquiera lo puede leer
+function decodificarPayload(token) {
+  try {
+    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes)); // TextDecoder para que los acentos no se rompan
+  } catch {
+    return null; // token roto o editado a mano en localStorage
+  }
+}
 
 // Ees una funcion para hablar con la api, y se construyo asi para no repetir en el codigo los elementos generales
 async function llamar(metodo, url, cuerpo) {
   const opciones = { method: metodo, headers: {} };
+
+  // si ya hay token, viaja en cada petición (el servidor decide si le sirve o no)
+  const token = leerToken();
+  if (token) opciones.headers['Authorization'] = `Bearer ${token}`;
 
   //aqui se usa un content type, solo cuando hay cuerpo para que el server sepa que es un json
   if (cuerpo) {
@@ -20,12 +51,17 @@ async function llamar(metodo, url, cuerpo) {
   } catch {
     datos = null;
   }
+
+  // login y refresh regresan un token nuevo: lo guardamos. Con logout el servidor ya lo revocó: lo borramos del navegador
+  if (respuesta.ok && datos && datos.token) guardarToken(datos.token);
+  if (respuesta.ok && url === '/api/jwt/logout') borrarToken();
+
   return { status: respuesta.status, datos };
 }
 
 // esta es la parte de la bitacora donde se van a poner los intentos que se han hecho
 function anotar(metodo, url, status, datos) {
-//colorcitos 
+//colorcitos
   let clase = 'error';
   if (status >= 200 && status < 300) clase = 'ok';
   else if (status === 401) clase = 'e401';
@@ -48,34 +84,56 @@ function anotar(metodo, url, status, datos) {
   $('bitacora').prepend(li);
 }
 
-//aqui jala la informacion que el servidor tiene de la sesion para aceptarlo o responder con un 401
+//aqui se le pregunta al servidor por el token (ruta jwt) para aceptarlo o responder con un 401
 async function cargarEstado() {
-  const { status, datos } = await llamar('GET', '/api/sesion');
   const estado = $('estado');
 
-  if (status === 200) {
-    estado.textContent = `${datos.usuario.nombre} (${datos.usuario.rol}) · sesión ${datos.sesion} · vence en ${datos.expiraEnSegundos} s`;
-    estado.className = 'estado con-sesion';
-  } else {
-    estado.textContent = 'Sin sesión (el servidor responde 401)';
+  if (!leerToken()) {
+    estado.textContent = 'Sin sesión (no hay token)';
     estado.className = 'estado sin-sesion';
+  } else {
+    const { status, datos } = await llamar('GET', '/api/jwt/perfil');
+
+    if (status === 200) {
+      estado.textContent = `${datos.nombre} (${datos.rol}) · token ${datos.jti.slice(0, 8)}… · vence en ${datos.expiraEnSegundos} s`;
+      estado.className = 'estado con-sesion';
+    } else {
+      // expiró, se revocó o es inválido: el token ya no sirve, se quita del navegador
+      estado.textContent = datos && datos.error ? datos.error : `Sin sesión (el servidor responde ${status})`;
+      estado.className = 'estado sin-sesion';
+      borrarToken();
+    }
   }
 
+  // con JWT el token NO es una cookie: aquí se ve (vacío) porque vive en localStorage
   $('cookie-js').textContent = document.cookie || '(vacío)';
 }
 
-// pues aqui es la tabla de sesiones 
+// pues aqui es la tabla de sesiones: la fila "la tuya" sale de tu token y las revocadas de la lista negra en MySQL
 async function cargarTabla() {
-  const { datos } = await llamar('GET', '/api/diagnostico/sesiones');
-
-  $('donde').textContent = datos.almacen === 'mysql'
-    ? 'En MySQL, tabla sessions: sobreviven a un reinicio del servidor'
-    : 'En la MEMORIA del servidor: se pierden al reiniciar';
-
+  const { datos } = await llamar('GET', '/api/diagnostico/tokens');
   const cuerpo = $('tabla-sesiones');
   cuerpo.replaceChildren();
 
-  if (datos.sesiones.length === 0) {
+  if (!datos || !datos.tokens) {
+    $('donde').textContent = 'No se pudo leer la lista negra (¿ya creaste la tabla tokens_revocados?)';
+    return;
+  }
+
+  $('donde').textContent = datos.revocar
+    ? 'JWT: el servidor no guarda las sesiones activas (la fila "la tuya" sale de tu propio token). Solo anota los tokens revocados en MySQL, tabla tokens_revocados'
+    : 'JWT con jwtRevocar = false: el servidor no guarda nada, el token sigue sirviendo hasta que venza';
+
+  const filas = [];
+  const payload = leerToken() ? decodificarPayload(leerToken()) : null;
+  if (payload) {
+    filas.push({ sesion: `${payload.jti.slice(0, 8)}… (la tuya)`, usuario: payload.sub, vence: payload.exp * 1000, tuya: true });
+  }
+  for (const t of datos.tokens) {
+    filas.push({ sesion: `${t.jti} (revocado)`, usuario: t.usuario, vence: t.exp });
+  }
+
+  if (filas.length === 0) {
     const fila = document.createElement('tr');
     const celda = document.createElement('td');
     celda.colSpan = 4;
@@ -85,13 +143,12 @@ async function cargarTabla() {
     return;
   }
 
-  for (const s of datos.sesiones) {
+  for (const f of filas) {
     const fila = document.createElement('tr');
-    if (s.esLaTuya) fila.className = 'tuya';
+    if (f.tuya) fila.className = 'tuya';
 
-    // aqui se convierte la fecha a algo legible para el usuario y s epone en sesiones
-    const vence = new Date(s.expira).toLocaleTimeString();
-    const textos = [s.esLaTuya ? `${s.sesion} (la tuya)` : s.sesion, s.usuario, s.visitas, vence];
+    // JWT no cuenta visitas (no hay sesión en el servidor), por eso esa columna va con guion
+    const textos = [f.sesion, f.usuario, '—', new Date(f.vence).toLocaleTimeString()];
 
     for (const texto of textos) {
       const celda = document.createElement('td');
@@ -102,7 +159,7 @@ async function cargarTabla() {
   }
 }
 
-// Después de cada acción refresco estado y tabla, porque el servidor pudo cambiar la sesión.
+// Después de cada acción refresco estado y tabla, porque el servidor pudo cambiar la lista negra.
 async function refrescarTodo() {
   await cargarEstado();
   await cargarTabla();
@@ -112,8 +169,8 @@ async function refrescarTodo() {
 $('form-login').addEventListener('submit', async (evento) => {
   evento.preventDefault();
   const cuerpo = { usuario: $('usuario').value, contrasena: $('contrasena').value };
-  const { status, datos } = await llamar('POST', '/api/login', cuerpo);
-  anotar('POST', '/api/login', status, datos);
+  const { status, datos } = await llamar('POST', '/api/jwt/login', cuerpo);
+  anotar('POST', '/api/jwt/login', status, datos);
   await refrescarTodo();
 });
 
@@ -126,7 +183,7 @@ $('usuario').addEventListener('change', () => {
 document.querySelectorAll('button[data-url]').forEach((boton) => {
   boton.addEventListener('click', async () => {
     const metodo = boton.dataset.metodo;
-    const url = boton.dataset.url;
+    const url = RUTAS_JWT[boton.dataset.url] || boton.dataset.url;
     const { status, datos } = await llamar(metodo, url);
     anotar(metodo, url, status, datos);
     await refrescarTodo();
@@ -136,7 +193,7 @@ document.querySelectorAll('button[data-url]').forEach((boton) => {
 $('btn-refrescar').addEventListener('click', refrescarTodo);
 $('btn-sesiones').addEventListener('click', cargarTabla);
 
-//como vimos en el html ya estaba el script hasta el final entonces ya solo llamo esto y no deberia dar error 
+//como vimos en el html ya estaba el script hasta el final entonces ya solo llamo esto y no deberia dar error
 (async () => {
   const { datos } = await llamar('GET', '/api/config');
   $('config').textContent = JSON.stringify(datos, null, 2);
