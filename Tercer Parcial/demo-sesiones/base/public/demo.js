@@ -84,6 +84,14 @@ function anotar(metodo, url, status, datos) {
   $('bitacora').prepend(li);
 }
 
+// el token completo y, debajo, lo que lleva dentro
+function textoDelToken() {
+  const token = leerToken();
+  if (!token) return '(vacío)';
+  const payload = decodificarPayload(token);
+  return `${token}\n\nPayload (solo base64, cualquiera lo puede leer):\n${payload ? JSON.stringify(payload, null, 2) : '(no se pudo leer)'}`;
+}
+
 //aqui se le pregunta al servidor por el token (ruta jwt) para aceptarlo o responder con un 401
 async function cargarEstado() {
   const estado = $('estado');
@@ -105,8 +113,10 @@ async function cargarEstado() {
     }
   }
 
-  // con JWT el token NO es una cookie: aquí se ve (vacío) porque vive en localStorage
-  $('cookie-js').textContent = document.cookie || '(vacío)';
+  // el index.html dice "document.cookie", pero con JWT el token vive en localStorage: corrijo el texto desde aquí
+  const etiqueta = document.querySelector('#tarjeta-estado .detalle');
+  if (etiqueta) etiqueta.textContent = 'Lo que el JavaScript de esta página puede leer: el token guardado en localStorage (no es una cookie, por eso document.cookie sale vacío) y lo que lleva dentro:';
+  $('cookie-js').textContent = textoDelToken();
 }
 
 // pues aqui es la tabla de sesiones: la fila "la tuya" sale de tu token y las revocadas de la lista negra en MySQL

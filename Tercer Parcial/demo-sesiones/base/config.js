@@ -14,7 +14,7 @@ module.exports = {
   rolling: false,
 
   // true: el JavaScript de la página NO puede leer la cookie (document.cookie no la muestra).
-  httpOnly: true,
+  httpOnly: false,
 
   // 'lax': la cookie no viaja en peticiones POST que vienen de otros sitios. 'strict' es más estricto.
   sameSite: 'lax',
