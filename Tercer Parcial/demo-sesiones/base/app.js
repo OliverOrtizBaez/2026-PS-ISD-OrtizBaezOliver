@@ -7,6 +7,7 @@ const MySQLStore = require('express-mysql-session')(session);
 const JWT = require('jsonwebtoken');
 const { crearModeloUsuarios } = require('./modelos/usuarios.modelo');
 const { crearModeloTokens } = require('./modelos/tokens.modelo');
+const { crearModeloCortes } = require('./modelos/cortes.modelo');
 
 const NOMBRE_COOKIE = 'connect.sid';
 
@@ -25,6 +26,7 @@ function crearApp(config, pool){
   app.use(express.json());
   const usuarios = crearModeloUsuarios(pool);
   const tokens = crearModeloTokens(pool);
+  const cortes = crearModeloCortes(pool);
 
   //necesito crear una sesión a partir del tipo, rol y privilegio del usuario
   //opcion 1 manejorlo desde mysql, significa que debo de tener una tabla de sesiones
@@ -227,8 +229,15 @@ function crearApp(config, pool){
       return res.status(401).json({error: '401 · Token inválido'});
     }
     try{
-      if(config.jwtRevocar && (await tokens.estaRevocado(datos.jti))){
-        return res.status(401).json({error: '401 · Token revocado, ya se cerró la sesión'});
+      if(config.jwtRevocar){
+        if(await tokens.estaRevocado(datos.jti)){
+          return res.status(401).json({error: '401 · Token revocado, ya se cerró la sesión'});
+        }
+        // "revocar todos": se rechaza cualquier token emitido en o antes de la fecha de corte
+        const corte = await cortes.corteDe(datos.sub);
+        if(corte && datos.iat <= corte){
+          return res.status(401).json({error: '401 · Token revocado: se revocaron todos los tokens'});
+        }
       }
     }catch(error){
       return next(error);
@@ -289,6 +298,31 @@ function crearApp(config, pool){
     }
   });
 
+  // Revocar TODOS los tokens. Sin parámetros: todos los tuyos (cerrar sesión en todos lados).
+  // Con ?alcance=global: los de TODOS los usuarios, y eso solo lo puede hacer un admin.
+  // No se anotan token por token: se guarda una fecha de corte y todo lo emitido antes deja de servir.
+  app.post('/api/jwt/revocar-todos', requiereJWT, async(req, res, next)=>{
+    try{
+      const global = req.query.alcance === 'global';
+      if(global && req.usuario.rol !== 'admin'){
+        return res.status(403).json({error: `403 · Eres ${req.usuario.usuario}, pero revocar los tokens de todos es solo para admin`});
+      }
+      if(!config.jwtRevocar){
+        return res.json({mensaje: 'el servidor no guarda nada (jwtRevocar = false), no se puede revocar', revocado: false});
+      }
+      const corte = Math.floor(Date.now()/1000);
+      await cortes.cortarDesde(global ? '*' : req.usuario.usuario, corte);
+      res.json({
+        mensaje: global ? 'se revocaron los tokens de TODOS los usuarios' : `se revocaron todos los tokens de ${req.usuario.usuario}`,
+        alcance: global ? 'global' : 'usuario',
+        corte: new Date(corte * 1000).toISOString(),
+        revocado: true
+      });
+    }catch(error){
+      next(error);
+    }
+  });
+
   //igual que el diagnóstico de sesiones: solo para la clase, en productivo jamas se expone
   app.get('/api/diagnostico/tokens', async(req, res, next)=>{
     try{
@@ -298,7 +332,8 @@ function crearApp(config, pool){
         exp: t.exp,
         revocadoEn: t.revocado_en,
       }));
-      res.json({revocar: config.jwtRevocar, tokens: lista});
+      const fechasDeCorte = (await cortes.listar()).map((c) => ({usuario: c.usuario, desde: Number(c.desde) * 1000}));
+      res.json({revocar: config.jwtRevocar, tokens: lista, cortes: fechasDeCorte});
     }catch(error){
       next(error);
     }

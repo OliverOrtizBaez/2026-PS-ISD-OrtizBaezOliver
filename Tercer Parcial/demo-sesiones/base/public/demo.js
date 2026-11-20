@@ -70,14 +70,15 @@ async function llamar(metodo, url, cuerpo) {
   }
 
   // el token que acabamos de mandar quedó revocado en el servidor (logout o refresh): lo apuntamos para poder verlo
+  const ruta = url.split('?')[0]; // sin el ?alcance=global
   if (respuesta.ok && token) {
-    if (url === '/api/jwt/logout' && datos && datos.revocado) guardarRevocado(token);
-    if (url === '/api/jwt/refresh' && revocaTokens) guardarRevocado(token);
+    if ((ruta === '/api/jwt/logout' || ruta === '/api/jwt/revocar-todos') && datos && datos.revocado) guardarRevocado(token);
+    if (ruta === '/api/jwt/refresh' && revocaTokens) guardarRevocado(token);
   }
 
   // login y refresh regresan un token nuevo: lo guardamos. Con logout el servidor ya lo revocó: lo borramos del navegador
   if (respuesta.ok && datos && datos.token) guardarToken(datos.token);
-  if (respuesta.ok && url === '/api/jwt/logout') borrarToken();
+  if (respuesta.ok && (ruta === '/api/jwt/logout' || ruta === '/api/jwt/revocar-todos')) borrarToken();
 
   return { status: respuesta.status, datos };
 }
@@ -196,6 +197,11 @@ async function cargarTabla() {
   if (payload) {
     filas.push({ sesion: `${payload.jti.slice(0, 8)}… (la tuya)`, usuario: payload.sub, vence: payload.exp * 1000, tuya: true });
   }
+  // "revocar todos": no hay un token por fila, hay una fecha de corte
+  for (const c of datos.cortes || []) {
+    const quien = c.usuario === '*' ? 'TODOS los usuarios' : c.usuario;
+    filas.push({ sesion: `CORTE · todos los tokens de ${quien} emitidos antes de ${new Date(c.desde).toLocaleTimeString()}`, usuario: c.usuario === '*' ? 'todos' : c.usuario, vence: null });
+  }
   for (const t of datos.tokens) {
     filas.push({ sesion: `${t.jti} (revocado ${new Date(t.revocadoEn).toLocaleTimeString()})`, usuario: t.usuario, vence: t.exp });
   }
@@ -215,7 +221,7 @@ async function cargarTabla() {
     if (f.tuya) fila.className = 'tuya';
 
     // JWT no cuenta visitas (no hay sesión en el servidor), por eso esa columna va con guion
-    const textos = [f.sesion, f.usuario, '—', new Date(f.vence).toLocaleTimeString()];
+    const textos = [f.sesion, f.usuario, '—', f.vence ? new Date(f.vence).toLocaleTimeString() : '—'];
 
     for (const texto of textos) {
       const celda = document.createElement('td');
@@ -245,6 +251,19 @@ $('form-login').addEventListener('submit', async (evento) => {
 $('usuario').addEventListener('change', () => {
   $('contrasena').value = `${$('usuario').value}12345`;
 });
+
+// Botones de "revocar todos". El index.html no se toca: se agregan a la misma fila de botones de la sección 3.
+const filaDeBotones = document.querySelector('.botones');
+for (const url of ['/api/jwt/revocar-todos', '/api/jwt/revocar-todos?alcance=global']) {
+  const boton = document.createElement('button');
+  boton.type = 'button';
+  boton.className = 'peligro';
+  boton.dataset.metodo = 'POST';
+  boton.dataset.url = url;
+  boton.textContent = `POST ${url}`;
+  boton.title = url.includes('global') ? 'Revoca los tokens de TODOS los usuarios (solo admin)' : 'Revoca todos tus tokens (cierra sesión en todos lados)';
+  filaDeBotones.append(boton);
+}
 
 //aqui escucha todos los botones para que no se tenga que poner un escucha por cada boton, y se hace un forEach para que se haga en todos los botones que tengan data-url
 document.querySelectorAll('button[data-url]').forEach((boton) => {
