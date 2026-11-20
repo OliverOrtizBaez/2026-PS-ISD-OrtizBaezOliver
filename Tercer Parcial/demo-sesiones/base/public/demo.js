@@ -8,6 +8,23 @@ const leerToken = () => localStorage.getItem(CLAVE_TOKEN);
 const guardarToken = (token) => localStorage.setItem(CLAVE_TOKEN, token);
 const borrarToken = () => localStorage.removeItem(CLAVE_TOKEN);
 
+// El servidor en MySQL solo anota el jti de los revocados (no guarda el token entero).
+// Para poder VER los tokens completos que ya revocamos, el navegador se apunta una copia.
+const CLAVE_REVOCADOS = 'jwt_revocados';
+let revocaTokens = true; // se actualiza con jwtRevocar de /api/config
+function leerRevocados() {
+  try {
+    return JSON.parse(localStorage.getItem(CLAVE_REVOCADOS)) || [];
+  } catch {
+    return [];
+  }
+}
+function guardarRevocado(token) {
+  const lista = leerRevocados().filter((t) => t !== token);
+  lista.unshift(token); // el más reciente primero
+  localStorage.setItem(CLAVE_REVOCADOS, JSON.stringify(lista.slice(0, 10)));
+}
+
 // El index.html no se modifica: sus botones siguen diciendo /api/perfil, /api/logout, etc.
 // Aquí se traducen a la ruta JWT incorporada, para no tener dos juegos de rutas en la página.
 // (/api/visita no está: es un contador guardado en la sesión del servidor, JWT no guarda nada de eso)
@@ -52,6 +69,12 @@ async function llamar(metodo, url, cuerpo) {
     datos = null;
   }
 
+  // el token que acabamos de mandar quedó revocado en el servidor (logout o refresh): lo apuntamos para poder verlo
+  if (respuesta.ok && token) {
+    if (url === '/api/jwt/logout' && datos && datos.revocado) guardarRevocado(token);
+    if (url === '/api/jwt/refresh' && revocaTokens) guardarRevocado(token);
+  }
+
   // login y refresh regresan un token nuevo: lo guardamos. Con logout el servidor ya lo revocó: lo borramos del navegador
   if (respuesta.ok && datos && datos.token) guardarToken(datos.token);
   if (respuesta.ok && url === '/api/jwt/logout') borrarToken();
@@ -87,9 +110,40 @@ function anotar(metodo, url, status, datos) {
 // el token completo y, debajo, lo que lleva dentro
 function textoDelToken() {
   const token = leerToken();
-  if (!token) return '(vacío)';
-  const payload = decodificarPayload(token);
-  return `${token}\n\nPayload (solo base64, cualquiera lo puede leer):\n${payload ? JSON.stringify(payload, null, 2) : '(no se pudo leer)'}`;
+  let texto = '(vacío)';
+  if (token) {
+    const payload = decodificarPayload(token);
+    texto = `${token}\n\nPayload (solo base64, cualquiera lo puede leer):\n${payload ? JSON.stringify(payload, null, 2) : '(no se pudo leer)'}`;
+  }
+
+  // los que ya no sirven: el servidor los rechaza con 401 "Token revocado"
+  const revocados = leerRevocados();
+  if (revocados.length > 0) {
+    texto += `\n\nTokens revocados (${revocados.length}), ya no sirven:`;
+    revocados.forEach((t, i) => {
+      const p = decodificarPayload(t);
+      const detalle = p ? `usuario ${p.sub} · jti ${p.jti} · vencía ${new Date(p.exp * 1000).toLocaleTimeString()}` : '(no se pudo leer)';
+      texto += `\n\n${i + 1}) ${t}\n   ${detalle}`;
+    });
+  }
+  return texto;
+}
+
+// Datos de la sesión que está viva y la hora (del reloj de ESTE navegador) en que vence.
+// Se calcula con lo que dijo el servidor (expiraEnSegundos), así no importa si el reloj de la PC va adelantado.
+let sesionViva = null;
+
+function formatoTiempo(segundos) {
+  const m = Math.floor(segundos / 60);
+  const s = segundos % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// pinta la línea de estado con el contador; regresa los segundos que faltan
+function pintarEstado() {
+  const restante = Math.max(0, Math.ceil((sesionViva.venceMs - Date.now()) / 1000));
+  $('estado').textContent = `${sesionViva.nombre} (${sesionViva.rol}) · token ${sesionViva.jti.slice(0, 8)}… · vence en ${formatoTiempo(restante)}`;
+  return restante;
 }
 
 //aqui se le pregunta al servidor por el token (ruta jwt) para aceptarlo o responder con un 401
@@ -97,16 +151,19 @@ async function cargarEstado() {
   const estado = $('estado');
 
   if (!leerToken()) {
+    sesionViva = null;
     estado.textContent = 'Sin sesión (no hay token)';
     estado.className = 'estado sin-sesion';
   } else {
     const { status, datos } = await llamar('GET', '/api/jwt/perfil');
 
     if (status === 200) {
-      estado.textContent = `${datos.nombre} (${datos.rol}) · token ${datos.jti.slice(0, 8)}… · vence en ${datos.expiraEnSegundos} s`;
+      sesionViva = { nombre: datos.nombre, rol: datos.rol, jti: datos.jti, venceMs: Date.now() + datos.expiraEnSegundos * 1000 };
+      pintarEstado();
       estado.className = 'estado con-sesion';
     } else {
       // expiró, se revocó o es inválido: el token ya no sirve, se quita del navegador
+      sesionViva = null;
       estado.textContent = datos && datos.error ? datos.error : `Sin sesión (el servidor responde ${status})`;
       estado.className = 'estado sin-sesion';
       borrarToken();
@@ -115,7 +172,7 @@ async function cargarEstado() {
 
   // el index.html dice "document.cookie", pero con JWT el token vive en localStorage: corrijo el texto desde aquí
   const etiqueta = document.querySelector('#tarjeta-estado .detalle');
-  if (etiqueta) etiqueta.textContent = 'Lo que el JavaScript de esta página puede leer: el token guardado en localStorage (no es una cookie, por eso document.cookie sale vacío) y lo que lleva dentro:';
+  if (etiqueta) etiqueta.textContent = 'Lo que el JavaScript de esta página puede leer: el token guardado en localStorage (no es una cookie, por eso document.cookie sale vacío), lo que lleva dentro y los tokens que ya revocaste:';
   $('cookie-js').textContent = textoDelToken();
 }
 
@@ -140,7 +197,7 @@ async function cargarTabla() {
     filas.push({ sesion: `${payload.jti.slice(0, 8)}… (la tuya)`, usuario: payload.sub, vence: payload.exp * 1000, tuya: true });
   }
   for (const t of datos.tokens) {
-    filas.push({ sesion: `${t.jti} (revocado)`, usuario: t.usuario, vence: t.exp });
+    filas.push({ sesion: `${t.jti} (revocado ${new Date(t.revocadoEn).toLocaleTimeString()})`, usuario: t.usuario, vence: t.exp });
   }
 
   if (filas.length === 0) {
@@ -201,11 +258,21 @@ document.querySelectorAll('button[data-url]').forEach((boton) => {
 });
 
 $('btn-refrescar').addEventListener('click', refrescarTodo);
+
+// Contador en vivo: cada segundo se actualiza el tiempo que le queda al token SIN molestar al servidor.
+// Cuando llega a 0 sí se le pregunta: el servidor responde 401 "Tu token expiró" y la página lo muestra.
+setInterval(() => {
+  if (!sesionViva) return;
+  if (pintarEstado() > 0) return;
+  sesionViva = null; // para que no se repita mientras el servidor contesta
+  refrescarTodo();
+}, 1000);
 $('btn-sesiones').addEventListener('click', cargarTabla);
 
 //como vimos en el html ya estaba el script hasta el final entonces ya solo llamo esto y no deberia dar error
 (async () => {
   const { datos } = await llamar('GET', '/api/config');
   $('config').textContent = JSON.stringify(datos, null, 2);
+  revocaTokens = !datos || datos.jwtRevocar !== false;
   await refrescarTodo();
 })();
